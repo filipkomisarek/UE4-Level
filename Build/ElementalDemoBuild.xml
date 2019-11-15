@@ -1,0 +1,63 @@
+<?xml version='1.0' ?>
+<BuildGraph xmlns="http://www.epicgames.com/BuildGraph" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.epicgames.com/BuildGraph ../../../../Engine/Build/Graph/Schema.xsd" >
+
+	<!-- Example build graph for generating PGO data -->
+	<!-- Usage: AutomationTool.exe BuildGraph -Script=Samples\Showcases\ElementalDemo\Build\ElementalDemoBuild.xml -target="Profile ElementalDemo PS4" -->
+
+	<!-- Other options -->
+	<Option Name="OutputDir" DefaultValue="$(RootDir)/LocalBuilds" Description="Output directory for packaged builds"/>
+	
+	<!-- PGO engine configuration (In production, use shipping, ElementalDemo does not exit in shipping see level blueprint) -->
+	<Property Name="PGOConfig" Value="Development"/>
+	<Property Name="PGODevice" Value="default"/>
+
+	<!-- Compile the editor and tools needed to cook and package -->
+	<Agent Name="ElementalDemoEditor" Type="CompileWin64;Win64">
+		<!-- Compile UnrealHeaderTool -->
+		<Node Name="Compile UnrealHeaderTool Win64">
+			<Compile Target="UnrealHeaderTool" Platform="Win64" Configuration="Development"/>
+		</Node>
+
+		<!-- Compile the ElementalDemo editor -->
+		<Node Name="Compile ElementalDemoEditor Win64" Requires="Compile UnrealHeaderTool Win64">
+			<Compile Target="UE4Editor" Platform="Win64" Configuration="Development"/>
+		</Node>
+
+		<!-- Compile other tools we need to cook and package -->
+		<Node Name="Compile Tools Win64" Requires="Compile UnrealHeaderTool Win64">
+			<Compile Target="ShaderCompileWorker" Platform="Win64" Configuration="Development"/>
+			<Compile Target="UnrealPak" Platform="Win64" Configuration="Development"/>
+		</Node>
+	</Agent>
+
+	<!-- Declare properties to contain a list of client platforms that can be built from this host platform. -->
+	<Property Name="ClientPlatforms" Value="Win64;PS4;XboxOne;Switch"/>
+
+	<!-- Compile client executables with PGO instrumentation -->
+	<Agent Name="Compile ElementalDemo Clients" Type="CompileWin64;Win64">
+		<ForEach Name="ClientPlatform" Values="$(ClientPlatforms)">
+			<Node Name="Compile ElementalDemo $(ClientPlatform)" Requires="Compile UnrealHeaderTool Win64">
+				<Compile Target="UE4Game" Platform="$(ClientPlatform)" Configuration="$(PGOConfig)" Arguments="-PGOProfile"/>
+			</Node>
+		</ForEach>
+	</Agent>
+	
+	<!-- Setup client packaging for enabled platforms -->
+	<Agent Name="Package ElementalDemo Clients" Type="Win64">
+	<ForEach Name="ClientPlatform" Values="$(ClientPlatforms)">
+		<Node Name="Package ElementalDemo $(ClientPlatform)" Requires="Compile ElementalDemoEditor Win64;Compile Tools Win64;Compile ElementalDemo $(ClientPlatform)">
+			<Command Name="BuildCookRun" Arguments="-Project=$(RootDir)/Samples/Showcases/ElementalDemo/ElementalDemo.uproject -SkipBuild -Cook -Stage -Pak -Platform=$(ClientPlatform) -Config=$(PGOConfig) -SkipArchive -StagingDirectory=&quot;$(OutputDir)&quot;"/>
+		</Node>
+	</ForEach>
+	</Agent>
+	
+	<!-- Define Gauntlet commands to generate PGO data on target device(s) -->
+	<Agent Name="Profile ElementalDemo Clients" Type="Win64">
+	<ForEach Name="ClientPlatform" Values="$(ClientPlatforms)">
+		<Node Name="Profile ElementalDemo $(ClientPlatform)" Requires="Package ElementalDemo $(ClientPlatform)">
+			<Command Name="RunUnreal" Arguments="-Project=ElementalDemo -tests=UnrealPGO(platform=$(ClientPlatform)) -verbose -wait=1200 -build=&quot;$(OutputDir)&quot; -configuration=$(PGOConfig) -log -device=&quot;$(PGODevice)&quot; -ProfileOutputDirectory=&quot;$(OutputDir)/PGO&quot; -ScreenshotDirectory=&quot;$(OutputDir)/PGO/$(ClientPlatform)&quot; -clientargs=&quot;-FullStdOutLogOutput&quot; -logdir=&quot;$(OutputDir)/Automation/Logs&quot;" />
+		</Node>
+	</ForEach>
+	</Agent>
+	
+</BuildGraph>
